@@ -78,6 +78,15 @@ class AddTokensRequest(BaseModel):
     pool: str = "basic"
     tags: list[str] = []
 
+class ImportSub2Request(BaseModel):
+    """Import SSO tokens from Sub2API export / paste (A2G reverse direction)."""
+    content: str = ""
+    contents: list[str] = []
+    tokens: list[str] = []
+    sso_tokens: list[str] = []
+    pool: str = "basic"
+    tags: list[str] = []
+
 
 class EditTokenRequest(BaseModel):
     old_token: str
@@ -201,6 +210,125 @@ async def _list_invalid_tokens(repo: "AccountRepository") -> list[str]:
     ]
 
 
+
+# ---------------------------------------------------------------------------
+# Sub2API (SUB2) import helpers — SSO extract + never overwrite
+# ---------------------------------------------------------------------------
+
+_SUB2_SSO_KEYS = ("token", "sso", "sso_token", "ssoToken", "sso_cookie")
+
+
+def _collect_sso_strings(value, out: list[str]) -> None:
+    """Recursively collect candidate SSO strings from nested JSON-like values."""
+    if value is None:
+        return
+    if isinstance(value, str):
+        s = value.strip()
+        if s:
+            out.append(s)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _collect_sso_strings(item, out)
+        return
+    if not isinstance(value, dict):
+        return
+
+    # Prefer explicit token/sso fields on objects
+    for key in _SUB2_SSO_KEYS:
+        if key in value and isinstance(value.get(key), str) and value[key].strip():
+            out.append(value[key])
+            return
+
+    # Sub2API export: {type: sub2api-data, accounts:[{credentials:{sso}}]}
+    accounts = value.get("accounts")
+    if isinstance(accounts, list):
+        for acc in accounts:
+            if not isinstance(acc, dict):
+                continue
+            # Only Grok-related accounts when platform is present
+            platform = str(acc.get("platform") or "").strip().lower()
+            if platform and platform not in ("grok", "xai", "x.ai"):
+                continue
+            creds = acc.get("credentials")
+            if isinstance(creds, dict):
+                _collect_sso_strings(creds, out)
+            else:
+                _collect_sso_strings(acc, out)
+        return
+
+    creds = value.get("credentials")
+    if isinstance(creds, dict):
+        _collect_sso_strings(creds, out)
+        return
+
+    for key in ("tokens", "sso_tokens", "pool", "items"):
+        if key in value:
+            _collect_sso_strings(value.get(key), out)
+
+    # Grok2API-style pool maps
+    for key in ("basic", "super", "heavy", "console"):
+        if isinstance(value.get(key), list):
+            _collect_sso_strings(value[key], out)
+
+    # Fallback: walk nested containers
+    for v in value.values():
+        if isinstance(v, (list, dict)):
+            _collect_sso_strings(v, out)
+
+
+def _extract_sso_from_text_chunk(chunk: str) -> list[str]:
+    chunk = (chunk or "").strip()
+    if not chunk:
+        return []
+    out: list[str] = []
+    if chunk[:1] in "{[":
+        try:
+            parsed = orjson.loads(chunk)
+            _collect_sso_strings(parsed, out)
+            return out
+        except Exception:
+            # fall through to line parse
+            pass
+    # TXT / multi-line / comma-separated
+    for part in chunk.replace("\r", "\n").replace(",", "\n").split("\n"):
+        s = part.strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def extract_sso_tokens_for_sub2_import(
+    *,
+    content: str = "",
+    contents: list[str] | None = None,
+    tokens: list[str] | None = None,
+    sso_tokens: list[str] | None = None,
+) -> list[str]:
+    """Parse Sub2API export / G2A pool / plain SSO list into unique sanitized SSOs."""
+    raw: list[str] = []
+    for t in tokens or []:
+        if t:
+            raw.append(str(t))
+    for t in sso_tokens or []:
+        if t:
+            raw.append(str(t))
+    if content and content.strip():
+        raw.extend(_extract_sso_from_text_chunk(content))
+    for chunk in contents or []:
+        if chunk and str(chunk).strip():
+            raw.extend(_extract_sso_from_text_chunk(str(chunk)))
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        tok = _sanitize(item)
+        if not tok or tok in seen:
+            continue
+        seen.add(tok)
+        cleaned.append(tok)
+    return cleaned
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -296,6 +424,73 @@ async def add_tokens(
         "skipped": len(existing),
     })
 
+
+
+@router.post("/tokens/import/sub2")
+async def import_sub2(
+    req: ImportSub2Request,
+    auto_nsfw: bool = Query(False),
+    repo: "AccountRepository" = Depends(get_repo),
+    refresh_svc: "AccountRefreshService" = Depends(get_refresh_svc),
+):
+    """Import SSO tokens from Sub2API (SUB2) export into Grok2API pool.
+
+    Accepts Sub2API `sub2api-data` JSON (accounts[].credentials.sso*), plain txt
+    (one SSO per line), or paste. Duplicate SSOs already in the pool are skipped
+    and never overwritten.
+    """
+    requested_pool = (req.pool or "basic").strip().lower() or "basic"
+    cleaned = extract_sso_tokens_for_sub2_import(
+        content=req.content or "",
+        contents=req.contents or [],
+        tokens=req.tokens or [],
+        sso_tokens=req.sso_tokens or [],
+    )
+    if not cleaned:
+        raise ValidationError(
+            "No valid SSO tokens found in Sub2API export (need credentials.sso / sso_token, or one SSO per line)",
+            param="content",
+        )
+
+    # Same dedupe policy as /tokens/add: never overwrite active existing tokens.
+    existing = {r.token for r in await repo.get_accounts(cleaned) if not r.is_deleted()}
+    new_tokens = [t for t in cleaned if t not in existing]
+    skipped = len(cleaned) - len(new_tokens)
+
+    if not new_tokens:
+        return _json({
+            "status": "success",
+            "total": len(cleaned),
+            "count": 0,
+            "skipped": skipped,
+            "pool": requested_pool,
+            "message": "all SSO tokens already exist; none overwritten",
+        })
+
+    upserts = [AccountUpsert(token=t, pool=requested_pool, tags=req.tags) for t in new_tokens]
+    result = await repo.upsert_accounts(upserts)
+    logger.info(
+        "admin sub2 import: pool={} total={} added_count={} skipped_count={}",
+        requested_pool,
+        len(cleaned),
+        len(new_tokens),
+        skipped,
+    )
+
+    _fire_and_forget(_refresh_then_auto_nsfw(
+        refresh_svc,
+        repo,
+        new_tokens,
+        auto_nsfw_enabled=auto_nsfw,
+    ))
+
+    return _json({
+        "status": "success",
+        "total": len(cleaned),
+        "count": result.upserted or len(new_tokens),
+        "skipped": skipped,
+        "pool": requested_pool,
+    })
 
 @router.delete("/tokens")
 async def delete_tokens(

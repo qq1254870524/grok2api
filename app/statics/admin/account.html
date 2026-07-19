@@ -608,7 +608,8 @@
 
     /* Dialogs */
     #modal-import .modal,
-    #modal-import-file .modal { width:min(440px,92vw) }
+    #modal-import-file .modal,
+    #modal-import-sub2 .modal { width:min(480px,92vw) }
     #modal-export .modal {
       width:min(440px,92vw);
       padding-top:14px;
@@ -733,6 +734,10 @@
       <button onclick="openImport()" class="page-action-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         <span data-i18n="account.actionImportShort">导入</span>
+      </button>
+      <button onclick="openSub2Import()" class="page-action-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span data-i18n="account.actionSub2ImportShort">SUB2导入</span>
       </button>
       <button onclick="openAdd()" class="page-action-btn page-action-btn-primary">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1067,6 +1072,43 @@
     <div class="dialog-actions">
       <button onclick="closeModal('modal-import-file')" class="dialog-btn" data-i18n="account.cancel">取消</button>
       <button onclick="doImport()" class="dialog-btn dialog-btn-primary" data-i18n="account.actionImport">导入</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── SUB2 Import Modal (from Sub2API) ─────────────────────────────────── -->
+<div class="modal-overlay" id="modal-import-sub2">
+  <div class="modal">
+    <div class="modal-title" data-i18n="account.sub2ImportTitle">SUB2导入</div>
+    <div class="dialog-body">
+      <div class="dialog-help" data-i18n="account.sub2ImportHint">上传或粘贴 Sub2API 账号导出（sub2api-data JSON 中 Grok 账号的 credentials.sso / sso_token），或每行一个 SSO。已存在的 SSO 一律跳过，不会覆盖。</div>
+      <div class="dialog-field">
+        <span class="dialog-label" data-i18n="account.labelFile">文件</span>
+        <input class="import-file-input" id="sub2-import-file" type="file" accept=".txt,.json,text/plain,application/json" onchange="updateSub2ImportFileState()">
+        <label for="sub2-import-file" class="import-file-shell">
+          <div class="import-file-name empty" id="sub2-import-file-name" data-i18n="account.noFile">未选择文件</div>
+        </label>
+      </div>
+      <div>
+        <div class="dialog-help" data-i18n="account.sub2ImportPasteHint">或直接粘贴导出内容</div>
+        <textarea class="input dialog-textarea" id="sub2-import-paste" rows="7" placeholder="粘贴 Sub2API JSON 或每行一个 SSO..." data-i18n-placeholder="account.sub2ImportPastePlaceholder"></textarea>
+      </div>
+      <div class="dialog-field" id="sub2-import-pool-row">
+        <span class="dialog-label" data-i18n="account.labelType">类型</span>
+        <select class="input" id="sub2-import-pool" style="flex:1"></select>
+      </div>
+      <div class="dialog-field" style="margin-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="sub2-import-auto-nsfw" style="margin:0">
+          <span data-i18n="account.autoNsfwOnImport">导入后自动开启 NSFW</span>
+        </label>
+        <div style="font-size:12px;color:var(--fg-muted);margin-top:4px" data-i18n="account.autoNsfwHint">需要额外时间检测账户状态</div>
+      </div>
+    </div>
+    <div class="dialog-actions">
+      <button onclick="closeModal('modal-import-sub2')" class="dialog-btn" data-i18n="account.cancel">取消</button>
+      <button onclick="doSub2Import()" class="dialog-btn dialog-btn-primary" data-i18n="account.actionSub2Import">开始导入</button>
     </div>
   </div>
 </div>
@@ -1788,6 +1830,63 @@ async function doEdit() {
     showToast(tr('account.editDone', null, '编辑完成'), 'success');
     load();
   } catch (e) { showToast(`${tr('account.editFailed', null, '编辑失败')}: ${e.message}`, 'error'); }
+}
+
+
+// ── SUB2 Import (from Sub2API account export) ─────────────────────────────
+function openSub2Import() {
+  document.getElementById('sub2-import-file').value = '';
+  document.getElementById('sub2-import-paste').value = '';
+  updateSub2ImportFileState();
+  fillImportPoolOptions('sub2-import-pool');
+  openModal('modal-import-sub2');
+}
+
+function updateSub2ImportFileState() {
+  const file = document.getElementById('sub2-import-file').files?.[0];
+  const el = document.getElementById('sub2-import-file-name');
+  if (!el) return;
+  if (file) {
+    el.textContent = file.name;
+    el.classList.remove('empty');
+  } else {
+    el.textContent = tr('account.noFile', null, '未选择文件');
+    el.classList.add('empty');
+  }
+}
+
+async function doSub2Import() {
+  const file = document.getElementById('sub2-import-file').files?.[0];
+  const paste = (document.getElementById('sub2-import-paste').value || '').trim();
+  let content = paste;
+  if (file) {
+    try {
+      content = await file.text();
+    } catch (e) {
+      return showToast(`${tr('account.importFailed', null, '导入失败')}: ${e.message}`, 'error');
+    }
+  }
+  content = (content || '').trim();
+  if (!content) {
+    return showToast(tr('account.sub2ImportEmpty', null, '请选择 Sub2API 导出文件或粘贴内容'), 'error');
+  }
+  const pool = document.getElementById('sub2-import-pool').value;
+  const autoNsfw = document.getElementById('sub2-import-auto-nsfw').checked;
+  try {
+    showToast(tr('account.sub2Importing', null, '正在从 Sub2API 导入…'), 'info');
+    const d = await _api('POST', `/tokens/import/sub2?auto_nsfw=${autoNsfw}`, {
+      content,
+      pool: pool === 'auto' ? 'basic' : pool,
+    });
+    closeModal('modal-import-sub2');
+    const msg = d.skipped
+      ? tr('account.sub2ImportResultSkipped', { count: d.count, skipped: d.skipped, total: d.total || (d.count + d.skipped) }, `SUB2导入完成：新增 ${d.count}，跳过重复 ${d.skipped}`)
+      : tr('account.sub2ImportResult', { count: d.count, total: d.total || d.count }, `SUB2导入完成：新增 ${d.count} 个`);
+    showToast(msg, 'success');
+    load();
+  } catch (e) {
+    showToast(`${tr('account.sub2ImportFailed', null, 'SUB2导入失败')}: ${e.message}`, 'error');
+  }
 }
 
 function updateImportFileState() {

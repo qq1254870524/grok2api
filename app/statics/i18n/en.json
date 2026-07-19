@@ -310,8 +310,17 @@
       "expired": "Expired",
       "invalid": "Abnormal"
     },
-    "autoNsfwOnImport": "Auto-enable NSFW after import",
-    "autoNsfwHint": "Requires additional time to detect account status"
+    "actionSub2ImportShort": "SUB2 Import",
+    "actionSub2Import": "Start Import",
+    "sub2ImportTitle": "Import from Sub2API (SUB2)",
+    "sub2ImportHint": "Upload or paste a Sub2API account export (Grok accounts' credentials.sso / sso_token in sub2api-data JSON), or one SSO per line. Existing SSOs are always skipped and never overwritten.",
+    "sub2ImportPasteHint": "Or paste export content",
+    "sub2ImportPastePlaceholder": "Paste Sub2API JSON or one SSO per line...",
+    "sub2ImportEmpty": "Select a Sub2API export file or paste content",
+    "sub2Importing": "Importing from Sub2API…",
+    "sub2ImportResult": "SUB2 import done: {count} added",
+    "sub2ImportResultSkipped": "SUB2 import done: {count} added, {skipped} duplicates skipped",
+    "sub2ImportFailed": "SUB2 import failed"
   },
   "config": {
     "pageTitle": "Grok2API - Configuration Management",

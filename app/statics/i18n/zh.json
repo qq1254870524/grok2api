@@ -310,8 +310,17 @@
       "expired": "过期",
       "invalid": "异常"
     },
-    "autoNsfwOnImport": "导入后自动开启 NSFW",
-    "autoNsfwHint": "需要额外时间检测账户状态"
+    "actionSub2ImportShort": "SUB2导入",
+    "actionSub2Import": "开始导入",
+    "sub2ImportTitle": "从 Sub2API 导入 (SUB2)",
+    "sub2ImportHint": "上传或粘贴 Sub2API 账号导出（sub2api-data JSON 中 Grok 账号的 credentials.sso / sso_token），或每行一个 SSO。已存在的 SSO 一律跳过，不会覆盖。",
+    "sub2ImportPasteHint": "或直接粘贴导出内容",
+    "sub2ImportPastePlaceholder": "粘贴 Sub2API JSON 或每行一个 SSO...",
+    "sub2ImportEmpty": "请选择 Sub2API 导出文件或粘贴内容",
+    "sub2Importing": "正在从 Sub2API 导入…",
+    "sub2ImportResult": "SUB2导入完成：新增 {count} 个",
+    "sub2ImportResultSkipped": "SUB2导入完成：新增 {count}，跳过重复 {skipped}",
+    "sub2ImportFailed": "SUB2导入失败"
   },
   "config": {
     "pageTitle": "Grok2API - 配置管理",
