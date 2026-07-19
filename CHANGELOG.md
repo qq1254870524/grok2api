@@ -8,7 +8,7 @@
 - 启动脚本 start_g2a.ps1 优先 **8010**，被占时回退 **8012**（同一套代码与库）。
 
 ### Peer Sub2
-- 新文件：pp/products/openai/peer_sub2.py
+- 新文件：pp/products/openai/peer_sub2.py
 - 接入：chat.py / console_chat.py / 
 outer.py
 - 默认配置见 config.defaults.toml [peer]：
@@ -21,7 +21,7 @@ outer.py
 ### SUB2 导入（已有能力回顾）
 - 管理页「SUB2导入」：服务端拉取 Sub2 export/g2a-sso
 - SSO 去重 skip，不覆盖
-- Admin 鉴权用 **pp_key**
+- Admin 鉴权用 **app_key**
 
 ### 端口说明
 - 正常：http://127.0.0.1:8010
