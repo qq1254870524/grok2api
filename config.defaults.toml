@@ -180,3 +180,16 @@ asset_upload_concurrency = 10
 asset_list_concurrency   = 50
 # 删除 Asset 并发数（全局，跨所有并发请求共享；也作为管理后台批量清理的 token 级默认值）
 asset_delete_concurrency = 50
+
+
+# ==================== Peer Sub2API failover ====================
+# When local account pool fails (429/no accounts/5xx), optionally forward to Sub2API.
+[peer]
+sub2_enabled = false
+sub2_base_url = "http://127.0.0.1:8080"
+sub2_api_key = ""
+prefer_local_first = true
+timeout_seconds = 90
+# Empty = all models; otherwise list of model ids/prefixes
+models = ["grok-4.5", "grok-4"]
+on_status_codes = [429, 503, 502, 401, 403]

@@ -49,7 +49,7 @@ if (-not (Test-PortFree 8010)) {
 $log = Join-Path $env:TEMP "g2a_granian_$port.log"
 $err = Join-Path $env:TEMP "g2a_granian_$port.err"
 $p = Start-Process -FilePath $Granian -ArgumentList @(
-  '--interface','asgi','--host','127.0.0.1','--port',"$port",'--workers','1','app.main:app'
+  '--interface','asgi','--host','0.0.0.0','--port',"$port",'--workers','1','app.main:app'
 ) -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $err
 
 Start-Sleep -Seconds 3
@@ -64,3 +64,4 @@ Write-Host "Failed to verify new bridge on port $port. Logs:"
 if (Test-Path $err) { Get-Content $err -Tail 30 }
 if (Test-Path $log) { Get-Content $log -Tail 30 }
 exit 1
+

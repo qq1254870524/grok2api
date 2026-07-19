@@ -11,6 +11,12 @@ import orjson
 from app.platform.logging.logger import logger
 from app.platform.config.snapshot import get_config
 from app.platform.errors import RateLimitError, UpstreamError, ValidationError
+from app.products.openai.peer_sub2 import (
+    peer_enabled,
+    peer_prefer_local_first,
+    forward_to_sub2,
+    try_peer_after_local_failure,
+)
 from app.platform.runtime.clock import now_s
 from app.platform.storage import save_local_image
 from app.platform.tokens import (
@@ -490,6 +496,19 @@ async def completions(
         )
     # ─────────────────────────────────────────────────────────────────────────
 
+    # Peer Sub2 first when prefer_local_first=false (non-console models)
+    if peer_enabled() and not peer_prefer_local_first():
+        try:
+            return await forward_to_sub2(
+                model=model,
+                messages=messages,
+                stream=is_stream,
+                temperature=temperature,
+                top_p=top_p,
+            )
+        except Exception as peer_exc:
+            logger.warning("peer.sub2 preferred path failed (chat): {}", peer_exc)
+
     message, files = _extract_message(messages)
     if not message.strip():
         raise UpstreamError("Empty message after extraction", status=400)
@@ -800,6 +819,16 @@ async def completions(
                         exc.status,
                         _upstream_body_excerpt(exc),
                     )
+                    peer_result = await try_peer_after_local_failure(
+                        model=model,
+                        messages=messages,
+                        stream=False,
+                        temperature=temperature,
+                        top_p=top_p,
+                        exc=exc,
+                    )
+                    if peer_result is not None:
+                        return peer_result
                     raise
 
         finally:

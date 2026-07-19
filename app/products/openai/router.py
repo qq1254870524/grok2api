@@ -213,8 +213,15 @@ async def _upload_to_data_uri(upload: UploadFile, *, param: str) -> str:
 @router.post(
     "/chat/completions", tags=[_TAG_CHAT], dependencies=[Depends(verify_api_key)]
 )
-async def chat_completions_endpoint(req: ChatCompletionRequest):
+async def chat_completions_endpoint(request: Request, req: ChatCompletionRequest):
     _validate_chat(req)
+    # Peer hop anti-recursion: Sub2 (or another G2A) already tried us.
+    try:
+        from .peer_sub2 import mark_inbound_peer_hop, PEER_HEADER, PEER_HEADER_ALT
+        hv = request.headers.get(PEER_HEADER) or request.headers.get(PEER_HEADER_ALT) or ""
+        mark_inbound_peer_hop(str(hv).strip() in {"1", "true", "yes", "on"})
+    except Exception:
+        pass
     from app.platform.config.snapshot import get_config
 
     cfg = get_config()

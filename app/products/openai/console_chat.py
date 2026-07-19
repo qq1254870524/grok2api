@@ -32,6 +32,12 @@ from app.dataplane.reverse.protocol.xai_console_chat import (
 )
 from app.products._account_selection import reserve_account, selection_max_retries
 from app.products.openai.chat import _configured_retry_codes, _should_retry_upstream
+from .peer_sub2 import (
+    peer_enabled,
+    peer_prefer_local_first,
+    forward_to_sub2,
+    try_peer_after_local_failure,
+)
 from ._format import (
     make_response_id,
     make_stream_chunk,
@@ -116,8 +122,30 @@ async def completions(
         model, stream, len(messages),
     )
 
+    # Peer Sub2 first when prefer_local_first=false
+    if peer_enabled() and not peer_prefer_local_first():
+        try:
+            return await forward_to_sub2(
+                model=model,
+                messages=messages,
+                stream=stream,
+                temperature=temperature,
+                top_p=top_p,
+            )
+        except Exception as peer_exc:
+            logger.warning("peer.sub2 preferred path failed, fall back local: {}", peer_exc)
+
     from app.dataplane.account import _directory as _acct_dir
     if _acct_dir is None:
+        # No local directory: try peer before hard fail
+        if peer_enabled():
+            try:
+                return await forward_to_sub2(
+                    model=model, messages=messages, stream=stream,
+                    temperature=temperature, top_p=top_p,
+                )
+            except Exception as peer_exc:
+                logger.warning("peer.sub2 after no-directory failed: {}", peer_exc)
         raise RateLimitError("Account directory not initialised")
     directory = _acct_dir
 
@@ -285,6 +313,17 @@ async def completions(
                     )
                     excluded.append(token)
                     continue
+                peer_result = await try_peer_after_local_failure(
+                    model=model,
+                    messages=messages,
+                    stream=False,
+                    temperature=temperature,
+                    top_p=top_p,
+                    exc=exc,
+                )
+                if peer_result is not None:
+                    success = True
+                    return peer_result
                 raise
 
         finally:
@@ -304,6 +343,17 @@ async def completions(
                     _fail_sync(token, selected_mode_id, fail_exc)
                 ).add_done_callback(_log_task_exception)
 
+    # Local retries exhausted — try Sub2 peer
+    peer_result = await try_peer_after_local_failure(
+        model=model,
+        messages=messages,
+        stream=False,
+        temperature=temperature,
+        top_p=top_p,
+        exc=RateLimitError("No available accounts after retries"),
+    )
+    if peer_result is not None:
+        return peer_result
     raise RateLimitError("No available accounts after retries")
 
 
