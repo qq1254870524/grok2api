@@ -86,6 +86,9 @@ class ImportSub2Request(BaseModel):
     sso_tokens: list[str] = []
     pool: str = "basic"
     tags: list[str] = []
+    # Direct bridge: G2A server pulls Sub2 lightweight SSO export
+    sub2_base_url: str = ""
+    sub2_admin_token: str = ""
 
 
 class EditTokenRequest(BaseModel):
@@ -426,6 +429,80 @@ async def add_tokens(
 
 
 
+
+async def _fetch_sub2_sso_tokens(base_url: str, admin_token: str) -> list[str]:
+    """Pull Grok SSO tokens from Sub2API lightweight export endpoint (server-side)."""
+    import urllib.error
+    import urllib.request
+
+    base = (base_url or "").strip().rstrip("/")
+    token = (admin_token or "").strip()
+    if not base or not token:
+        raise ValidationError(
+            "sub2_base_url and sub2_admin_token are required for direct bridge",
+            param="sub2_base_url",
+        )
+
+    url = f"{base}/api/v1/admin/accounts/export/g2a-sso"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "Grok2API-Sub2Bridge/1.0",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        raise ValidationError(
+            f"Sub2API export failed HTTP {e.code}: {body[:300] or e.reason}",
+            param="sub2_base_url",
+        ) from e
+    except Exception as e:  # noqa: BLE001
+        raise ValidationError(f"Sub2API export unreachable: {e}", param="sub2_base_url") from e
+
+    try:
+        payload = orjson.loads(raw)
+    except Exception as e:  # noqa: BLE001
+        raise ValidationError(
+            f"Sub2API export returned invalid JSON: {e}",
+            param="sub2_base_url",
+        ) from e
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        data = payload if isinstance(payload, dict) else {}
+
+    tokens: list[str] = []
+    seen: set[str] = set()
+
+    def _push(v: object) -> None:
+        if not isinstance(v, str):
+            return
+        t = _sanitize(v)
+        if not t or t in seen:
+            return
+        seen.add(t)
+        tokens.append(t)
+
+    for t in data.get("tokens") or []:
+        _push(t)
+    for item in data.get("items") or []:
+        if isinstance(item, dict):
+            _push(item.get("sso") or item.get("token") or item.get("sso_token"))
+        else:
+            _push(item)
+    if not tokens:
+        raise ValidationError(
+            "Sub2API export has no SSO tokens (accounts may be OAuth-only without credentials.sso)",
+            param="sub2_base_url",
+        )
+    return tokens
+
 @router.post("/tokens/import/sub2")
 async def import_sub2(
     req: ImportSub2Request,
@@ -433,22 +510,29 @@ async def import_sub2(
     repo: "AccountRepository" = Depends(get_repo),
     refresh_svc: "AccountRefreshService" = Depends(get_refresh_svc),
 ):
-    """Import SSO tokens from Sub2API (SUB2) export into Grok2API pool.
+    """Import SSO tokens from Sub2API (SUB2) into Grok2API pool.
 
-    Accepts Sub2API `sub2api-data` JSON (accounts[].credentials.sso*), plain txt
-    (one SSO per line), or paste. Duplicate SSOs already in the pool are skipped
-    and never overwritten.
+    Modes:
+      1) Direct bridge: sub2_base_url + sub2_admin_token → server pulls
+         GET /api/v1/admin/accounts/export/g2a-sso
+      2) Legacy: content/tokens/paste/file export
+
+    Duplicate SSOs already in the pool are skipped and never overwritten.
     """
     requested_pool = (req.pool or "basic").strip().lower() or "basic"
-    cleaned = extract_sso_tokens_for_sub2_import(
-        content=req.content or "",
-        contents=req.contents or [],
-        tokens=req.tokens or [],
-        sso_tokens=req.sso_tokens or [],
-    )
+    cleaned: list[str] = []
+    if (req.sub2_base_url or "").strip() and (req.sub2_admin_token or "").strip():
+        cleaned = await _fetch_sub2_sso_tokens(req.sub2_base_url, req.sub2_admin_token)
+    else:
+        cleaned = extract_sso_tokens_for_sub2_import(
+            content=req.content or "",
+            contents=req.contents or [],
+            tokens=req.tokens or [],
+            sso_tokens=req.sso_tokens or [],
+        )
     if not cleaned:
         raise ValidationError(
-            "No valid SSO tokens found in Sub2API export (need credentials.sso / sso_token, or one SSO per line)",
+            "No valid SSO tokens found (use Sub2 direct bridge URL+token, or export with credentials.sso / one SSO per line)",
             param="content",
         )
 

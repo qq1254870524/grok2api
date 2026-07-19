@@ -317,7 +317,13 @@
     "sub2Importing": "Importing from Sub2API…",
     "sub2ImportResult": "SUB2 import done: {count} added",
     "sub2ImportResultSkipped": "SUB2 import done: {count} added, {skipped} duplicates skipped",
-    "sub2ImportFailed": "SUB2 import failed"
+    "sub2ImportFailed": "SUB2 import failed",
+    "sub2BaseUrl": "Sub2API base URL",
+    "sub2BaseUrlPlaceholder": "http://127.0.0.1:8080",
+    "sub2AdminToken": "Sub2API Admin Token",
+    "sub2AdminTokenPlaceholder": "Admin Bearer JWT",
+    "sub2DirectNote": "G2A server pulls Sub2 export/g2a-sso",
+    "sub2Advanced": "Advanced: file / paste"
   },
   "config": {
     "pageTitle": "Grok2API - 構成管理",

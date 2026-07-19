@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -1079,22 +1079,36 @@
 
 <!-- ── SUB2 Import Modal (from Sub2API) ─────────────────────────────────── -->
 <div class="modal-overlay" id="modal-import-sub2">
-  <div class="modal">
+  <div class="modal" style="width:min(520px,94vw)">
     <div class="modal-title" data-i18n="account.sub2ImportTitle">SUB2导入</div>
     <div class="dialog-body">
-      <div class="dialog-help" data-i18n="account.sub2ImportHint">上传或粘贴 Sub2API 账号导出（sub2api-data JSON 中 Grok 账号的 credentials.sso / sso_token），或每行一个 SSO。已存在的 SSO 一律跳过，不会覆盖。</div>
-      <div class="dialog-field">
-        <span class="dialog-label" data-i18n="account.labelFile">文件</span>
-        <input class="import-file-input" id="sub2-import-file" type="file" accept=".txt,.json,text/plain,application/json" onchange="updateSub2ImportFileState()">
-        <label for="sub2-import-file" class="import-file-shell">
-          <div class="import-file-name empty" id="sub2-import-file-name" data-i18n="account.noFile">未选择文件</div>
-        </label>
+      <div class="dialog-help" data-i18n="account.sub2ImportHint">填写 Sub2API 地址与 Admin Token，由 G2A 服务端直连接入对端 Grok SSO 号池。已存在的 SSO 一律跳过，不会覆盖。</div>
+      <div class="dialog-field" style="flex-direction:column;align-items:stretch;gap:6px">
+        <span class="dialog-label" data-i18n="account.sub2BaseUrl">Sub2API 地址</span>
+        <input class="input" id="sub2-import-base-url" type="text" placeholder="http://127.0.0.1:8080" data-i18n-placeholder="account.sub2BaseUrlPlaceholder" autocomplete="off">
       </div>
-      <div>
-        <div class="dialog-help" data-i18n="account.sub2ImportPasteHint">或直接粘贴导出内容</div>
-        <textarea class="input dialog-textarea" id="sub2-import-paste" rows="7" placeholder="粘贴 Sub2API JSON 或每行一个 SSO..." data-i18n-placeholder="account.sub2ImportPastePlaceholder"></textarea>
+      <div class="dialog-field" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:10px">
+        <span class="dialog-label" data-i18n="account.sub2AdminToken">Sub2API Admin Token</span>
+        <input class="input" id="sub2-import-admin-token" type="password" placeholder="Bearer JWT / localStorage.auth_token" data-i18n-placeholder="account.sub2AdminTokenPlaceholder" autocomplete="off">
       </div>
-      <div class="dialog-field" id="sub2-import-pool-row">
+      <div class="dialog-help" style="margin-top:8px" data-i18n="account.sub2DirectNote">G2A 后端会请求 Sub2 的 /api/v1/admin/accounts/export/g2a-sso，无需手动导出文件。</div>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;font-size:13px" data-i18n="account.sub2Advanced">高级：文件 / 粘贴导入</summary>
+        <div style="margin-top:10px">
+          <div class="dialog-field">
+            <span class="dialog-label" data-i18n="account.labelFile">文件</span>
+            <input class="import-file-input" id="sub2-import-file" type="file" accept=".txt,.json,text/plain,application/json" onchange="updateSub2ImportFileState()">
+            <label for="sub2-import-file" class="import-file-shell">
+              <div class="import-file-name empty" id="sub2-import-file-name" data-i18n="account.noFile">未选择文件</div>
+            </label>
+          </div>
+          <div>
+            <div class="dialog-help" data-i18n="account.sub2ImportPasteHint">或直接粘贴导出内容</div>
+            <textarea class="input dialog-textarea" id="sub2-import-paste" rows="5" placeholder="粘贴 Sub2API JSON 或每行一个 SSO..." data-i18n-placeholder="account.sub2ImportPastePlaceholder"></textarea>
+          </div>
+        </div>
+      </details>
+      <div class="dialog-field" id="sub2-import-pool-row" style="margin-top:12px">
         <span class="dialog-label" data-i18n="account.labelType">类型</span>
         <select class="input" id="sub2-import-pool" style="flex:1"></select>
       </div>
@@ -1835,8 +1849,19 @@ async function doEdit() {
 
 // ── SUB2 Import (from Sub2API account export) ─────────────────────────────
 function openSub2Import() {
-  document.getElementById('sub2-import-file').value = '';
-  document.getElementById('sub2-import-paste').value = '';
+  const fileEl = document.getElementById('sub2-import-file');
+  const pasteEl = document.getElementById('sub2-import-paste');
+  if (fileEl) fileEl.value = '';
+  if (pasteEl) pasteEl.value = '';
+  const urlEl = document.getElementById('sub2-import-base-url');
+  const tokEl = document.getElementById('sub2-import-admin-token');
+  try {
+    const savedUrl = localStorage.getItem('g2a_sub2_base_url');
+    if (urlEl) urlEl.value = savedUrl || 'http://127.0.0.1:8080';
+  } catch (_) {
+    if (urlEl && !urlEl.value) urlEl.value = 'http://127.0.0.1:8080';
+  }
+  if (tokEl) tokEl.value = tokEl.value || '';
   updateSub2ImportFileState();
   fillImportPoolOptions('sub2-import-pool');
   openModal('modal-import-sub2');
@@ -1856,8 +1881,10 @@ function updateSub2ImportFileState() {
 }
 
 async function doSub2Import() {
-  const file = document.getElementById('sub2-import-file').files?.[0];
-  const paste = (document.getElementById('sub2-import-paste').value || '').trim();
+  const file = document.getElementById('sub2-import-file')?.files?.[0];
+  const paste = (document.getElementById('sub2-import-paste')?.value || '').trim();
+  const sub2BaseUrl = (document.getElementById('sub2-import-base-url')?.value || '').trim().replace(/\/+$/, '');
+  const sub2AdminToken = (document.getElementById('sub2-import-admin-token')?.value || '').trim();
   let content = paste;
   if (file) {
     try {
@@ -1867,17 +1894,25 @@ async function doSub2Import() {
     }
   }
   content = (content || '').trim();
-  if (!content) {
-    return showToast(tr('account.sub2ImportEmpty', null, '请选择 Sub2API 导出文件或粘贴内容'), 'error');
+  const useDirect = !!(sub2BaseUrl && sub2AdminToken);
+  if (!useDirect && !content) {
+    return showToast(tr('account.sub2ImportEmpty', null, '请填写 Sub2API 地址+Token，或选择导出文件/粘贴内容'), 'error');
   }
   const pool = document.getElementById('sub2-import-pool').value;
   const autoNsfw = document.getElementById('sub2-import-auto-nsfw').checked;
   try {
     showToast(tr('account.sub2Importing', null, '正在从 Sub2API 导入…'), 'info');
-    const d = await _api('POST', `/tokens/import/sub2?auto_nsfw=${autoNsfw}`, {
-      content,
+    const body = {
       pool: pool === 'auto' ? 'basic' : pool,
-    });
+    };
+    if (useDirect) {
+      body.sub2_base_url = sub2BaseUrl;
+      body.sub2_admin_token = sub2AdminToken;
+      try { localStorage.setItem('g2a_sub2_base_url', sub2BaseUrl); } catch (_) {}
+    } else {
+      body.content = content;
+    }
+    const d = await _api('POST', `/tokens/import/sub2?auto_nsfw=${autoNsfw}`, body);
     closeModal('modal-import-sub2');
     const msg = d.skipped
       ? tr('account.sub2ImportResultSkipped', { count: d.count, skipped: d.skipped, total: d.total || (d.count + d.skipped) }, `SUB2导入完成：新增 ${d.count}，跳过重复 ${d.skipped}`)
@@ -1885,7 +1920,11 @@ async function doSub2Import() {
     showToast(msg, 'success');
     load();
   } catch (e) {
-    showToast(`${tr('account.sub2ImportFailed', null, 'SUB2导入失败')}: ${e.message}`, 'error');
+    let msg = e && e.message ? e.message : String(e);
+    if (/No valid SSO tokens found/i.test(msg) && sub2BaseUrl && sub2AdminToken) {
+      msg += ' | 当前 G2A 后端可能未加载直连导入（请重启新版，或改用 http://127.0.0.1:8012）';
+    }
+    showToast(`${tr('account.sub2ImportFailed', null, 'SUB2导入失败')}: ${msg}`, 'error');
   }
 }
 
